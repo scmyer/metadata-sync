@@ -1,0 +1,422 @@
+/* -------------------------------------------------------------------------------- */
+/* Project: HEAL 																	*/
+/* PI: Kira Bradford, Becky Boyles													*/
+/* Program: HEAL_03_StudyTable														*/
+/* Programmer: Sabrina McCutchan (CDMS)												*/
+/* Date Created: 2024/02/29															*/
+/* Date Last Updated: 2024/10/09													*/
+/* Description:	This program creates the xstudy_id field and the study_lookup_table.*/
+/*		1. Prep data																*/	
+/*		QC: Check alignment between MySQL and MDS primary key fields				*/
+/*		2. Split up records to prepare for handling appl_ids missing a study_id   	*/
+/*		3. Update hdpid0.dta records												*/
+/*		4. Update hdpid1.dta records												*/
+/*		5. Update studyidbad.dta records   											*/
+/*		6. Update missing values of study_id in the full dataset					*/
+/*		7. Most recent appl_id for each study 										*/
+/*		8. hdp id and associated appl_ids for each study 							*/
+/*		9. Create study table														*/
+/*																					*/	
+/* Notes:  																			*/
+/*		- The study lookup table only contains the entity "study." Other entity 	*/
+/*		  that Stewards track, CTN protocols and "other" entities, are excluded		*/
+/*		  from the study_lookup_table.												*/
+/*																					*/
+/* Version changes																	*/
+/*		- 2024/04/05 export subset of records for QC review							*/
+/*		- 2024/04/09 create unique_studies table for import into MySQL				*/
+/*		- 2024/04/17 create new study_id field based on study_id_stewards and hdp_id*/
+/*			, capture appl_id of the most recent record/study plus appl_id that 	*/
+/* 			performed the merge between MySQL and MDS records, rename program to 	*/
+/*			HEAL_MYSQL_02_StudyKey from HEAL_MYSQL_02_SelectStewardsRecord to show	*/
+/*			changed contents and purpose											*/
+/*		- 2024/04/30 multistep code for updating study_id to include hdp_id, some   */
+/*		  CTN-related records temporarily excluded									*/
+/*		- 2024/06/19 remove CTN-related records from pool before creating study ids	*/
+/*		- 2024/09/12 changed merge condition to create final key from m:1 to m:m    */
+/*			to accomodate new condition that arose, where there is a first-stage	*/
+/*			study ID generated that involves 1 appl_id split over 2 hdp IDs, plus	*/
+/*			1 different appl_id and hdp_id pair. 									*/ 
+/*																					*/
+/* -------------------------------------------------------------------------------- */
+
+
+/* ----- 1. Prep data ----- */
+use "$der/mysql_$today.dta", clear
+order appl_id $stewards_id_vars hdp_id
+sort $stewards_id_vars appl_id hdp_id	
+
+* Exclude records of non-study entities (CTN & "other") *;
+drop if mds_ctn_flag==1  /*n=40 dropped */
+drop if proj_ser_num=="" /*n=6 dropped*/
+sort appl_id
+merge m:1 appl_id using "$der/research_networks.dta"
+drop if _merge==2
+drop _merge res_net_override_flag
+drop if res_net=="CTN" /*n=188 deleted*/
+
+	/*
+	* Num of unique serial numbers: n=821 *;
+	keep proj_ser_num
+	sort proj_ser_num
+	duplicates drop 
+	*/
+
+* Generate study identifier *;
+/* Note: this must be done in 2 stages because missing values among the $stewards_id_vars group should still be assigned a number (subproj_id is often missing), but missing values of hdp_id should *not* be assigned a number */
+	* Stage 1 *;
+	egen xstudy_id_stewards=group($stewards_id_vars), missing
+	
+	* Stage 2 *;
+	egen study_id=group(xstudy_id_stewards hdp_id)
+	label var study_id "Unique Study ID"
+	order study_id xstudy_id_stewards
+
+* Non-missing subproject number by serial number *;
+gen xhas_subproj_num=1 if subproj_id!="" /*n=57*/
+bysort proj_ser_num: egen has_subproj_num_by_sernum=max(xhas_subproj_num)
+drop xhas_subproj_num
+
+save "$temp/mysql_$today.dta", replace /*n=1485*/
+
+* Count # of appl_ids for each xstudy_id_stewards *;
+use "$temp/mysql_$today.dta", clear
+keep xstudy_id_stewards appl_id
+sort xstudy_id_stewards appl_id
+duplicates drop
+by xstudy_id_stewards: egen num_appl_by_xstudyidstewards=count(appl_id)
+keep xstudy_id_stewards num_appl_by_xstudyidstewards
+duplicates drop
+save "$temp/sis_count.dta", replace
+
+* Count # of hdp_ids for each xstudy_id_stewards *;
+use "$temp/mysql_$today.dta", clear
+keep xstudy_id_stewards hdp_id
+sort xstudy_id_stewards hdp_id
+duplicates drop /*n=1365*/
+by xstudy_id_stewards: egen num_hdp_by_xstudyidstewards=count(hdp_id)
+keep xstudy_id_stewards num_hdp_by_xstudyidstewards
+duplicates drop /*n=1140*/
+save "$temp/hdpid_count.dta", replace
+
+* Merge in count vars
+use "$temp/mysql_$today.dta", clear
+sort xstudy_id_stewards
+merge m:1 xstudy_id_stewards using "$temp/sis_count.dta"
+drop _merge
+merge m:1 xstudy_id_stewards using "$temp/hdpid_count.dta"
+drop _merge
+order $key_vars
+save "$temp/mysql_noctn_$today.dta", replace
+
+
+
+/* ----- QC: Check alignment between MySQL and MDS primary key fields ----- */
+use "$temp/mysql_noctn_$today.dta", clear /*n=1485*/
+	
+* -- Check n's for QC -- *;
+gen valid_flag=0
+
+* 0 or 1 HDP_IDs matched to xstudy_id_stewards *;
+replace valid_flag=1 if num_hdp_by_xstudyidstewards==0 | num_hdp_by_xstudyidstewards==1 /*n=1341*/
+
+* Every appl_id under xstudy_id_stewards matched to exactly 1 HDP_ID *;
+replace valid_flag=1 if num_appl_by_xstudyidstewards==num_hdp_by_xstudyidstewards & num_hdp_by_appl==1 /*n=97*/
+
+* The xstudy_id_stewards only has 1 appl_id associated, and this 1 appl_id matched to >1 HDP_ID *;
+replace valid_flag=1 if num_appl_by_xstudyidstewards==1 /*n=18*/
+
+* Everything else: valid_flag==0 *;
+/*browse if valid_flag==0  */
+keep if valid_flag==0 /*n=29*/
+ /*
+  Note: appl_ids may appear only in MDS or MySQL data instead of both
+	tab merge_awards_mds if valid_flag==0
+	n=10 rows are appl_ids only in MySQL, not in MDS
+	n=1 rows are appl_ids only in MDS, not in MySQL
+  */
+export delimited using "$qc/sis_hdpid_comparison_issues.csv", replace
+
+
+
+
+
+/* ----- 2. Split up records to prepare for handling appl_ids missing a study_id ----- */
+
+* -- 0 HDP_IDs matched to xstudy_id_stewards --*; 
+	*Note: the unique value of xstudy_id_stewards indicates records in a group together. Variable study_id is always missing in this subset because of the egen option specified. Populate study_id with a new value that hasn't yet been used in the study_id variable. *;
+use "$temp/mysql_noctn_$today.dta", clear	
+keep if num_hdp_by_xstudyidstewards==0 
+save "$temp/hdpid0.dta", replace /*n=51*/
+
+* -- 1 HDP_ID matched to xstudy_id_stewards --*; 
+	* Note: the unique value of study_id for the one record with an HDP_ID should be applied to ALL records sharing the same xstudy_id_stewards *;
+use "$temp/mysql_noctn_$today.dta", clear
+keep if num_hdp_by_xstudyidstewards==1 
+save "$temp/hdpid1.dta", replace /*n=1290*/
+
+* -- Every appl_id under xstudy_id_stewards matched to exactly 1 HDP_ID --*; 
+	* Note: No further action needed for these records; they have all been assigned a study_id. *;
+use "$temp/mysql_noctn_$today.dta", clear	
+drop if num_hdp_by_xstudyidstewards==0 | num_hdp_by_xstudyidstewards==1
+keep if num_appl_by_xstudyidstewards==num_hdp_by_xstudyidstewards & num_hdp_by_appl==1 
+keep study_id appl_id
+save "$temp/studyidgood1.dta", replace /*n=97*/
+
+* -- The xstudy_id_stewards only has 1 appl_id associated, and this 1 appl_id matched to >1 HDP_ID --*; 
+	* Note: No further action needed for these records; they have all been assigned a study_id. *;
+	* Note: This set of records is excluded from building the studyidkey.dta file below because it breaks the 1:1 merge if included *;
+use "$temp/mysql_noctn_$today.dta", clear
+drop if num_hdp_by_xstudyidstewards==0 | num_hdp_by_xstudyidstewards==1
+keep if num_appl_by_xstudyidstewards==1 
+keep study_id appl_id
+save "$temp/studyidgood2.dta", replace /*n=18*/
+
+
+* -- What remains: xstudy_id_stewards where some appl_ids merged to an hdp_id and some didn't, and >1 hdp_id is involved -- *;
+use "$temp/mysql_noctn_$today.dta", clear	
+drop if num_hdp_by_xstudyidstewards==0 | num_hdp_by_xstudyidstewards==1
+drop if num_appl_by_xstudyidstewards==num_hdp_by_xstudyidstewards & num_hdp_by_appl==1
+drop if num_appl_by_xstudyidstewards==1 
+save "$temp/studyidbad.dta", replace /*n=29*/
+
+
+
+
+
+/* ----- 3. Update hdpid0.dta records ----- */
+
+* Max value of study_id *;
+use "$temp/mysql_noctn_$today.dta", clear
+summarize study_id, meanonly
+scalar maxid=r(max)
+
+* Create new values of study_id, beginning after previous max value *;
+use "$temp/hdpid0.dta", clear
+sort xstudy_id_stewards
+egen tempn=group(xstudy_id_stewards)
+gen xstudy_id=tempn+scalar(maxid)
+replace study_id=xstudy_id
+keep study_id appl_id hdp_id
+save "$temp/studyidgood3.dta", replace /*n=51*/
+
+
+
+
+
+/* ----- 4. Update hdpid1.dta records ----- */
+
+* Create key of the study_id for each xstudy_id_stewards value *;
+use "$temp/hdpid1.dta", clear
+keep study_id xstudy_id_stewards
+drop if study_id==.
+sort xstudy_id_stewards
+rename study_id xstudy_id
+save "$temp/studyid_sis_key.dta", replace
+
+* Update missing values of study_id *;
+use "$temp/hdpid1.dta", clear
+sort xstudy_id_stewards
+merge m:1 xstudy_id_stewards using "$temp/studyid_sis_key.dta"
+replace study_id=xstudy_id if study_id==.
+keep study_id appl_id hdp_id
+save "$temp/studyidgood4.dta", replace /*n=1290*/
+
+
+
+
+
+/* ----- 5. Update studyidbad.dta records ----- */
+
+* -- Split up records with non-missing and missing hdp_id -- *;
+* Non-missing HDP ID *;
+use "$temp/studyidbad.dta", clear
+keep if hdp_id!=""
+keep study_id xstudy_id_stewards appl_id proj_ser_num act_code hdp_id
+foreach var of varlist study_id appl_id	proj_ser_num act_code {
+	rename `var' z`var'
+	}
+sort xstudy_id_stewards
+save "$temp/studyidbad_nonmiss.dta", replace /*n=19*/
+
+* Missing HDP ID *;
+use "$temp/studyidbad.dta", clear
+keep if hdp_id==""
+sort xstudy_id_stewards
+save "$temp/studyidbad_miss.dta", replace /*n=10*/
+
+* -- Fix Missing: Find which study_id value should be assigned to records missing study_id, using activity code (act_code) -- *;
+use "$temp/studyidbad_miss.dta", clear
+joinby xstudy_id_stewards using "$temp/studyidbad_nonmiss.dta" /* creates all possible combinations */
+gen act_code_match=1 if act_code==zact_code
+tab appl_id act_code_match /* Check this results in only 1 record for each appl_id */
+keep if act_code_match==1
+replace study_id=zstudy_id
+keep study_id appl_id hdp_id
+save "$temp/studyidgood5.dta", replace /*n=10*/
+
+* -- Capture Non-missing -- *;
+use "$temp/studyidbad_nonmiss.dta", clear
+rename zstudy_id study_id
+rename zappl_id appl_id
+keep study_id appl_id hdp_id
+save "$temp/studyidgood6.dta", replace /*n=19*/
+
+
+
+
+
+/* ----- 6. Update missing values of study_id in the full dataset ----- */
+
+* Create key of appl_id and study_id *
+* Note: studyidgood2 is excluded from building the studyidkey.dta file below because it breaks the m:1 merge if included *;
+use "$temp/studyidgood1.dta", clear
+/* forv i=3/6 { */
+forv i=3/6 {
+	append using "$temp/studyidgood`i'.dta" 	
+	} /*n=1467*/
+rename study_id xstudy_id
+rename hdp_id xhdp_id
+sort appl_id xhdp_id
+duplicates list appl_id
+	/*n=2 appl_ids are duplicates - this is an appl_id that has two records with different hdp ids*/
+save "$temp/studyidkey.dta", replace
+
+* Update study_id in full dataset *;
+use "$temp/mysql_noctn_$today.dta", clear /*n=1485*/
+sort appl_id hdp_id
+merge m:m appl_id using "$temp/studyidkey.dta" /*n=18 not matched from master are the 18 records of studyidgood2*/
+list * if hdp_id!=xhdp_id & xhdp_id!="" /*n=0*/
+replace study_id=xstudy_id if xstudy_id!=. /*n=309 changes made*/
+drop xstudy_id xhdp_id _merge
+save "$temp/mysql_studyid_$today.dta", replace
+
+
+
+
+
+/* ----- 7. Most recent appl_id for each study ----- */
+use "$temp/mysql_studyid_$today.dta", clear 
+sort study_id fisc_yr
+drop if study_id==. /*n=0*/
+
+* Flag: latest project end date for the record *;
+by study_id: egen latest_proj_end_dt_forstudy=max(proj_end_date_date)
+  format latest_proj_end_dt_forstudy %td 
+
+* Latest fiscal year *;
+by study_id: egen latest_fy=max(fisc_yr)
+keep if latest_fy==fisc_yr /*n=1215*/
+
+* Latest budget end *;
+sort study_id bgt_end_date
+by study_id: egen latest_bgt_end=max(bgt_end_date)
+  format latest_bgt_end %td 
+keep if latest_bgt_end==bgt_end_date 
+
+	* Check # of duplicates by study_id *;
+	duplicates list study_id
+	/* n=0 duplicates */
+
+* Create key with most recent appl_id for study_id *;
+keep study_id appl_id
+rename appl_id study_most_recent_appl	
+sort study_id
+save "$temp/mostrecentapplid.dta", replace /*n=1214*/
+
+
+
+
+
+/* ----- 8. hdp id and associated appl_ids for each study ----- */
+use "$temp/mysql_studyid_$today.dta", clear 
+drop if study_id==. /*n=0*/
+drop if hdp_id=="" /*n=309*/
+keep study_id hdp_id appl_id
+sort study_id hdp_id appl_id
+rename appl_id study_hdp_id_appl
+rename hdp_id study_hdp_id
+save "$temp/hdpapplid.dta", replace /*n=1176*/
+	* Check # of duplicates by study_id *;
+	duplicates list study_id
+	/* n=0 duplicates */
+
+
+
+
+
+/* ----- 9. Create study table ----- */
+use "$temp/mysql_studyid_$today.dta", clear 
+drop if study_id==.
+keep study_id appl_id
+sort study_id appl_id
+merge m:1 study_id using "$temp/hdpapplid.dta"
+drop _merge
+merge m:1 study_id using "$temp/mostrecentapplid.dta"
+drop _merge
+order appl_id study_id study_most_recent_appl study_hdp_id study_hdp_id_appl
+rename study_id xstudy_id /* Note: prefixed with x to indicate variable is volatile and may change on a new run of program tree */
+tostring xstudy_id, replace
+label var appl_id "Application ID"
+label var study_most_recent_appl "Most recent appl_id for the study"
+label var study_hdp_id "The study's hdp_id"
+label var study_hdp_id_appl "The appl_id of the study's hdp_id"
+save "$der/study_lookup_table.dta", replace	
+export delimited using "$der/study_lookup_table.csv", nolab quote replace /*n=1485*/
+
+
+
+
+
+/* ----- 10. Create data dictionary for study table ----- */
+use "$der/study_lookup_table.dta", clear
+redcapture *, file("$temp/study_table_dd") form(study_lookup_table) text(appl_id xstudy_id study_most_recent_appl study_hdp_id_appl study_hdp_id) /*validate(appl_id xstudy_id study_most_recent_appl study_hdp_id_appl) validtype(integer integer integer integer) validmin(9000000 1 9000000 9000000) validmax(11000000 2000 11000000 11000000)*/
+
+import delimited using "$temp/study_table_dd.csv", varnames(1) stringcols(_all) clear
+
+* Cols *; 
+drop sectionheader branchinglogicshowfieldonlyif requiredfield customalignment questionnumbersurveysonly matrixgroupname textvalidationtypeshowslidernum
+rename variablefieldname var_name
+rename fieldlabel var_label
+rename fieldtype var_fmt
+rename formname table_name
+rename choicescalculationssliderlabels choicelist
+foreach word in min max {
+	rename textvalidation`word' var_`word'
+	}
+gen var_length=""
+rename fieldnote var_note
+
+order table_name var_name var_label var_fmt choicelist var_min var_max var_length identifier var_note
+ 
+ 
+* Cells *; 
+foreach var in appl_id study_most_recent_appl study_hdp_id_appl {
+	replace var_fmt="VARCHAR(8)" if var_name=="`var'"
+	replace var_length="8" if var_name=="`var'"
+	}
+replace var_fmt="VARCHAR(4)" if var_name=="xstudy_id"
+	replace var_length="4" if var_name=="xstudy_id"
+replace var_fmt="CHAR(8)" if var_name=="study_hdp_id"
+	replace var_length="8" if var_name=="study_hdp_id"
+
+foreach x in min max {
+	replace var_`x'="" if var_name=="study_hdp_id"
+	}
+
+/*replace identifier="PK" if var_name=="appl_id" */ 
+	/*Note: A PK can't be assigned for this table because no column has only unique values. This is a consequence of the way the table is structured, to allow lookup of both the latest appl_id and the associated hdp_id (if any) for any appl_id. */
+replace identifier="FK" if var_name=="study_hdp_id"
+
+replace var_note="The study ID is generated by HEAL Stewards" if var_name=="xstudy_id"
+replace var_note="There cannot be more than 1 HDP ID for a given Study ID, by definition" if var_name=="study_hdp_id"
+export delimited using "$doc/study_table_dd.csv", replace
+
+
+
+
+
+
+
+
+
