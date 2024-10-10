@@ -5,7 +5,7 @@
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/05/13															*/
 /* Date Last Updated: 2024/10/09													*/
-/* Description:	This Stata program is for performing quick queries ad-hoc.			*/
+/* Description:	This program performs ad-hoc queries.								*/
 /*																					*/
 /* Notes:  																			*/
 /*		- 2024/06/11 reversed order of queries so new queries are added to top of	*/
@@ -21,64 +21,45 @@ clear all
 /* ------- QUERY -------- */
 /* ---------------------- */
 
-
-/* ----- Query: 2024/10/06	----- */
-/* Note: Read in exports of data from monday.com boards. */
-
-*  Convert spreadsheet tabs to Stata .dta *;
-global tabs engagement_in_progress dd_file_in_hand no_vlmd_expected
-foreach tab in $tabs {
-	import excel using "C:\Users\smccutchan\OneDrive - Research Triangle Institute\Documents\HEAL\monday_boards\Data_Dictionary_Tracker_1728247808.xlsx", sheet("`tab'") /*firstrow case(lower)*/ allstring clear
-	drop if _n == 1 
-	foreach x of varlist * {
-		replace `x'=subinstr(`x', "`=char(10)'", "`=char(32)'", .) /* replace linebreaks inside cells with a space */
-		replace `x'=strtrim(`x')
-		replace `x'=stritrim(`x')
-		replace `x'=ustrtrim(`x')
-		label var `x' `"`=`x'[1]'"'
-		}
-	missings dropvars * , force /* drop columns with no data */
-	missings dropobs * , force /* drop rows with no data */
-	gen source_tab="`tab'"
-	/*gen xrowID=_n*/
-	save "$temp/`tab'.dta", replace
-	/*descsave using "$raw/`src'/`tab'.dta", list(,) idstr(`tab') saving("$temp/`src'/varlist_`tab'.dta", replace) */
-	}
-	
-clear
-foreach tab in $tabs {
-	append using "$temp/`tab'.dta"
-	}
-drop if A=="Name"
-gen vlmd_in_hss=0
-replace vlmd_in_hss=1 if T=="Yes"
-label var vlmd_in_hss "VLMD in HSS"
-do "$prog/HEAL_valuelabels"
-label values vlmd_in_hss yesno
-save "$temp/monday_data.dta", replace
-
-
-
-
 /* ----- Query: 2024/10/01	----- */
 /* Note: RJ over email requested "a list of independent studies and SBIR's expiring in 2025". */
 
+* Prep study info *;
+use "$der/study_lookup_table.dta", clear
+drop appl_id
+destring xstudy_id, generate(study_id_final)
+drop xstudy_id
+order study_id_final
+sort study_id_final study_most_recent_appl study_hdp_id 
+duplicates drop 
+save "$temp/study_info.dta", replace /*n=1214*/
+
+
 * Merge res_net *;
-use "$der/mysql_$today.dta", clear
+use "$der/mysql_$today.dta", clear /*n=1719*/
+egen compound_key=concat(appl_id hdp_id), punct(_)
 sort appl_id
 merge m:1 appl_id using "$der/research_networks.dta"
-drop if entity_type!="Study"
-drop if merge_awards_mds==2
+drop _merge
+merge 1:1 compound_key using "$doc/studyidkey.dta", keepusing(study_id_final)
+drop _merge
+merge m:1 study_id_final using "$temp/study_info.dta"
+drop _merge
 
-* Exclude if in a res_net *;
-keep if res_net==""
+* Exclusion criteria *;
+drop if entity_type!="Study" /*n=46 dropped*/
+drop if merge_awards_mds==2 /*n=2 dropped*/
+keep if res_net=="" /*n=739 dropped*/
 
 * Expiring in 2025 *;
 gen year_end=year(proj_end_date_date)
-keep if year_end==2025
+keep if year_end==2025 /*n=133 left*/
 
 * Output results *;
-keep appl_id hdp_id fisc_yr fund_mech res_net year_end 
+keep appl_id hdp_id fisc_yr fund_mech year_end study_id_final study_id_final study_hdp_id study_hdp_id_appl merge_awards_mds
+
+	browse if hdp_id=="" /* Note: these do make it into study_lookup_table */
+
 sort fund_mech appl_id hdp_id
 export delimited using "$out/appls_ending_2025.csv", quote replace
 

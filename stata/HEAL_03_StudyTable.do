@@ -4,7 +4,7 @@
 /* Program: HEAL_03_StudyTable														*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/02/29															*/
-/* Date Last Updated: 2024/10/09													*/
+/* Date Last Updated: 2024/10/10													*/
 /* Description:	This program creates the xstudy_id field and the study_lookup_table.*/
 /*		1. Prep data																*/	
 /*		QC: Check alignment between MySQL and MDS primary key fields				*/
@@ -23,6 +23,9 @@
 /*		  from the study_lookup_table.												*/
 /*																					*/
 /* Version changes																	*/
+/*		- 2024/10/10 compound_key introduced to merge study id key back into full	*/
+/*		   dataset. Prior merge settings were not correctly handling a small number */
+/*		   of appl_ids.																*/
 /*		- 2024/04/05 export subset of records for QC review							*/
 /*		- 2024/04/09 create unique_studies table for import into MySQL				*/
 /*		- 2024/04/17 create new study_id field based on study_id_stewards and hdp_id*/
@@ -79,6 +82,13 @@ drop xhas_subproj_num
 
 save "$temp/mysql_$today.dta", replace /*n=1485*/
 
+
+		* Keep to check completeness later on *;
+		use "$temp/mysql_$today.dta", clear
+		keep if study_id==. & xstudy_id!=.
+		save "$temp/check_studyid_assigns.dta", replace
+
+
 * Count # of appl_ids for each xstudy_id_stewards *;
 use "$temp/mysql_$today.dta", clear
 keep xstudy_id_stewards appl_id
@@ -106,7 +116,12 @@ merge m:1 xstudy_id_stewards using "$temp/sis_count.dta"
 drop _merge
 merge m:1 xstudy_id_stewards using "$temp/hdpid_count.dta"
 drop _merge
-order $key_vars
+
+* Create compound key for merging later *;
+sort appl_id hdp_id
+egen compound_key=concat(appl_id hdp_id), punct(_)
+
+order $key_vars compound_key
 save "$temp/mysql_noctn_$today.dta", replace
 
 
@@ -160,7 +175,7 @@ save "$temp/hdpid1.dta", replace /*n=1290*/
 use "$temp/mysql_noctn_$today.dta", clear	
 drop if num_hdp_by_xstudyidstewards==0 | num_hdp_by_xstudyidstewards==1
 keep if num_appl_by_xstudyidstewards==num_hdp_by_xstudyidstewards & num_hdp_by_appl==1 
-keep study_id appl_id
+keep study_id appl_id hdp_id compound_key
 save "$temp/studyidgood1.dta", replace /*n=97*/
 
 * -- The xstudy_id_stewards only has 1 appl_id associated, and this 1 appl_id matched to >1 HDP_ID --*; 
@@ -169,7 +184,7 @@ save "$temp/studyidgood1.dta", replace /*n=97*/
 use "$temp/mysql_noctn_$today.dta", clear
 drop if num_hdp_by_xstudyidstewards==0 | num_hdp_by_xstudyidstewards==1
 keep if num_appl_by_xstudyidstewards==1 
-keep study_id appl_id
+keep study_id appl_id hdp_id compound_key
 save "$temp/studyidgood2.dta", replace /*n=18*/
 
 
@@ -197,7 +212,7 @@ sort xstudy_id_stewards
 egen tempn=group(xstudy_id_stewards)
 gen xstudy_id=tempn+scalar(maxid)
 replace study_id=xstudy_id
-keep study_id appl_id hdp_id
+keep study_id appl_id hdp_id compound_key
 save "$temp/studyidgood3.dta", replace /*n=51*/
 
 
@@ -217,9 +232,9 @@ save "$temp/studyid_sis_key.dta", replace
 * Update missing values of study_id *;
 use "$temp/hdpid1.dta", clear
 sort xstudy_id_stewards
-merge m:1 xstudy_id_stewards using "$temp/studyid_sis_key.dta"
+merge m:1 xstudy_id_stewards using "$temp/studyid_sis_key.dta", keepusing(xstudy_id)
 replace study_id=xstudy_id if study_id==.
-keep study_id appl_id hdp_id
+keep study_id appl_id hdp_id compound_key
 save "$temp/studyidgood4.dta", replace /*n=1290*/
 
 
@@ -232,7 +247,7 @@ save "$temp/studyidgood4.dta", replace /*n=1290*/
 * Non-missing HDP ID *;
 use "$temp/studyidbad.dta", clear
 keep if hdp_id!=""
-keep study_id xstudy_id_stewards appl_id proj_ser_num act_code hdp_id
+keep study_id xstudy_id_stewards appl_id proj_ser_num act_code hdp_id compound_key
 foreach var of varlist study_id appl_id	proj_ser_num act_code {
 	rename `var' z`var'
 	}
@@ -252,14 +267,14 @@ gen act_code_match=1 if act_code==zact_code
 tab appl_id act_code_match /* Check this results in only 1 record for each appl_id */
 keep if act_code_match==1
 replace study_id=zstudy_id
-keep study_id appl_id hdp_id
+keep study_id appl_id hdp_id compound_key
 save "$temp/studyidgood5.dta", replace /*n=10*/
 
 * -- Capture Non-missing -- *;
 use "$temp/studyidbad_nonmiss.dta", clear
 rename zstudy_id study_id
 rename zappl_id appl_id
-keep study_id appl_id hdp_id
+keep study_id appl_id hdp_id compound_key
 save "$temp/studyidgood6.dta", replace /*n=19*/
 
 
@@ -269,26 +284,22 @@ save "$temp/studyidgood6.dta", replace /*n=19*/
 /* ----- 6. Update missing values of study_id in the full dataset ----- */
 
 * Create key of appl_id and study_id *
-* Note: studyidgood2 is excluded from building the studyidkey.dta file below because it breaks the m:1 merge if included *;
 use "$temp/studyidgood1.dta", clear
-/* forv i=3/6 { */
-forv i=3/6 {
+forv i=2/6 {
 	append using "$temp/studyidgood`i'.dta" 	
-	} /*n=1467*/
-rename study_id xstudy_id
-rename hdp_id xhdp_id
-sort appl_id xhdp_id
-duplicates list appl_id
-	/*n=2 appl_ids are duplicates - this is an appl_id that has two records with different hdp ids*/
-save "$temp/studyidkey.dta", replace
+	} /*n=1485*/
+sort compound_key
+duplicates list compound_key
+rename study_id study_id_final
+save "$doc/studyidkey.dta", replace
 
 * Update study_id in full dataset *;
 use "$temp/mysql_noctn_$today.dta", clear /*n=1485*/
-sort appl_id hdp_id
-merge m:m appl_id using "$temp/studyidkey.dta" /*n=18 not matched from master are the 18 records of studyidgood2*/
-list * if hdp_id!=xhdp_id & xhdp_id!="" /*n=0*/
-replace study_id=xstudy_id if xstudy_id!=. /*n=309 changes made*/
-drop xstudy_id xhdp_id _merge
+sort compound_key
+merge 1:1 compound_key using "$doc/studyidkey.dta", keepusing(study_id_final) 
+order study_id_final
+sort study_id_final appl_id hdp_id
+drop study_id xstudy_id_stewards _merge
 save "$temp/mysql_studyid_$today.dta", replace
 
 
@@ -297,31 +308,31 @@ save "$temp/mysql_studyid_$today.dta", replace
 
 /* ----- 7. Most recent appl_id for each study ----- */
 use "$temp/mysql_studyid_$today.dta", clear 
-sort study_id fisc_yr
-drop if study_id==. /*n=0*/
+sort study_id_final fisc_yr
+drop if study_id_final==. /*n=0*/
 
 * Flag: latest project end date for the record *;
-by study_id: egen latest_proj_end_dt_forstudy=max(proj_end_date_date)
+by study_id_final: egen latest_proj_end_dt_forstudy=max(proj_end_date_date)
   format latest_proj_end_dt_forstudy %td 
 
 * Latest fiscal year *;
-by study_id: egen latest_fy=max(fisc_yr)
+by study_id_final: egen latest_fy=max(fisc_yr)
 keep if latest_fy==fisc_yr /*n=1215*/
 
 * Latest budget end *;
-sort study_id bgt_end_date
-by study_id: egen latest_bgt_end=max(bgt_end_date)
+sort study_id_final bgt_end_date
+by study_id_final: egen latest_bgt_end=max(bgt_end_date)
   format latest_bgt_end %td 
 keep if latest_bgt_end==bgt_end_date 
 
 	* Check # of duplicates by study_id *;
-	duplicates list study_id
+	duplicates list study_id_final
 	/* n=0 duplicates */
 
 * Create key with most recent appl_id for study_id *;
-keep study_id appl_id
+keep study_id_final appl_id
 rename appl_id study_most_recent_appl	
-sort study_id
+sort study_id_final
 save "$temp/mostrecentapplid.dta", replace /*n=1214*/
 
 
@@ -330,15 +341,15 @@ save "$temp/mostrecentapplid.dta", replace /*n=1214*/
 
 /* ----- 8. hdp id and associated appl_ids for each study ----- */
 use "$temp/mysql_studyid_$today.dta", clear 
-drop if study_id==. /*n=0*/
+drop if study_id_final==. /*n=0*/
 drop if hdp_id=="" /*n=309*/
-keep study_id hdp_id appl_id
-sort study_id hdp_id appl_id
+keep study_id_final hdp_id appl_id
+sort study_id_final hdp_id appl_id
 rename appl_id study_hdp_id_appl
 rename hdp_id study_hdp_id
 save "$temp/hdpapplid.dta", replace /*n=1176*/
 	* Check # of duplicates by study_id *;
-	duplicates list study_id
+	duplicates list study_id_final
 	/* n=0 duplicates */
 
 
@@ -347,15 +358,15 @@ save "$temp/hdpapplid.dta", replace /*n=1176*/
 
 /* ----- 9. Create study table ----- */
 use "$temp/mysql_studyid_$today.dta", clear 
-drop if study_id==.
-keep study_id appl_id
-sort study_id appl_id
-merge m:1 study_id using "$temp/hdpapplid.dta"
+drop if study_id_final==. /*n=0*/
+keep study_id_final appl_id
+sort study_id_final appl_id
+merge m:1 study_id_final using "$temp/hdpapplid.dta"
 drop _merge
-merge m:1 study_id using "$temp/mostrecentapplid.dta"
+merge m:1 study_id_final using "$temp/mostrecentapplid.dta"
 drop _merge
-order appl_id study_id study_most_recent_appl study_hdp_id study_hdp_id_appl
-rename study_id xstudy_id /* Note: prefixed with x to indicate variable is volatile and may change on a new run of program tree */
+order appl_id study_id_final study_most_recent_appl study_hdp_id study_hdp_id_appl
+rename study_id_final xstudy_id /* Note: prefixed with x to indicate variable is volatile and may change on a new run of program tree */
 tostring xstudy_id, replace
 label var appl_id "Application ID"
 label var study_most_recent_appl "Most recent appl_id for the study"

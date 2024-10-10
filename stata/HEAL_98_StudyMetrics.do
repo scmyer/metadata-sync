@@ -85,7 +85,7 @@ asdoc, text(--------------4. Number of studies with VLMD available in HSS-------
 asdoc, text(Estimated by the number of items in the Stewards 'Data Dictionary Tracker' board for which 'in HSS' = Yes.) save($qc/StudyMetrics_$today.doc) append label
 
 *  Read in monday.com spreadsheet export tabs *;
-* Note: Some manual reformatting of the raw monday.com export file was done to make it more machine readable. The separate table sections of the original export were all on one tab; these were manually moved to distinct tabs, and the tabs were name as defined in the following global macro. *;
+* Note: Some manual reformatting of the Data Dictionary Tracker board export file was done to make it more machine readable. The separate table sections of the original export were all on one tab; these were manually moved to distinct tabs, and the tabs were name as defined in the following global macro. *;
 global tabs engagement_in_progress dd_file_in_hand no_vlmd_expected
 foreach tab in $tabs {
 	import excel using "C:\Users\smccutchan\OneDrive - Research Triangle Institute\Documents\HEAL\monday_boards\Data_Dictionary_Tracker_1728247808.xlsx", sheet("`tab'") /*firstrow case(lower)*/ allstring clear
