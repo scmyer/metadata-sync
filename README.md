@@ -1,2 +1,2 @@
 # metadata-sync
-Scripts to sync data between different data sources to keep different groups 
+This repository contains code used by the MySQL team to manage MySQL data and data processes. Various software are used by the MySQL team, including StataMP 18, MySQL Workbench, and Python. 
