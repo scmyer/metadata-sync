@@ -1,8 +1,6 @@
 import os,sys
 import webbrowser
 import pandas as pd
-pd.set_option('future.no_silent_downcasting', True)
-
 import numpy as np
 import requests
 import json
@@ -18,10 +16,9 @@ logger.setLevel(logging.INFO)
 
 # https://docs.aws.amazon.com/lambda/latest/dg/python-package.html
 
-
-
 def lambda_handler(event, context):
 
+    ### START OF NOTEBOOK ###
     ####################################################################################
     ### Gather metadata into useful form
     ####################################################################################
@@ -81,15 +78,10 @@ def lambda_handler(event, context):
 
     no_gen3_metadata = []
     missed_keys = []
-    
-    hdp_appl_dict = {}
-    
+
     for guid in guids:
 
         if 'gen3_discovery' in response_json[guid].keys():
-            if 'appl_id' in response_json[guid]['gen3_discovery']:  #ADDED 6/20
-                hdp_appl_dict[guid] = response_json[guid]['gen3_discovery']['appl_id']
-            
             metadata['gen3_metadata'][guid] = response_json[guid]['gen3_discovery'] # get majority metadata
 
             if '_guid_type' in response_json[guid].keys():
@@ -118,8 +110,6 @@ def lambda_handler(event, context):
     df4 = pd.merge(df1, df3, how='outer', on='guids')
 
     df_apid = df3['appl_id']
-    print("NIH_METADATA")
-    print(metadata['nih_metadata'])
     df1.drop(['appl_id'], axis=1, errors='ignore')
     df1 = pd.concat([df1, df_apid], axis=1)
 
@@ -129,15 +119,10 @@ def lambda_handler(event, context):
     ### Pull out relevant metadata
     ####################################################################################
     print(">>> Pull out relevant metadata")
-    # def replace_single_quote(input_list):
-    #     modified_list = [name.replace("'", "''") for name in input_list]
-    #     return str("[{}]".format(", ".join("'{}'".format(name) for name in modified_list)))
     def replace_single_quote(input_list):
-        modified_list = [name.replace("'", "`") for name in input_list]
+        modified_list = [name.replace("'", "''") for name in input_list]
         return str("[{}]".format(", ".join("'{}'".format(name) for name in modified_list)))
-    # def replace_single_quote(input_list):
-    #     modified_list = [name for name in input_list]
-    #     return json.dumps(modified_list)
+
 
     def mydf1function(rowdf):
         projname = rowdf.iloc[0]['project_title']
@@ -148,26 +133,18 @@ def lambda_handler(event, context):
         ctid = rowdf.iloc[0]['cedar_study_metadata.metadata_location.clinical_trials_study_ID']
         ctlink = rowdf.iloc[0]['cedar_study_metadata.metadata_location.clinical_trials_study_link']
         data_repositories = rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories']
-        repository_metadata= []
-        if len(data_repositories) > 0:
-            # print(f"----- {data_repositories[0]['repository_name']} -------")
-            repo_metadata = {}
-            for repo in data_repositories:
-                repo_metadata = {}
-                repo_metadata['repository_name'] = repo['repository_name']
-                repo_metadata['repository_study_ID'] = repo['repository_study_ID']
-                try:
-                    repo_metadata['repository_study_link'] = repo['repository_study_link']
-                except:
-                    pass
-                repository_metadata.append(repo_metadata)
-            # print(repository_metadata)
-            
         repository_name = ''
         repository_study_id = ''
-        if data_repositories != '':
-            repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[∂0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
-            repository_study_id = data_repositories[0]['repository_study_ID'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
+        if data_repositories:
+            repository_name = data_repositories[0].get('repository_name', '')
+
+            # Use .get() to safely access 'repository_study_ID' without KeyError
+            repository_study_id = data_repositories[0].get('repository_study_ID', '')
+        # if data_repositories != '':
+        #     repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
+
+        #     if "repository_study_ID" in data_repositories[0]:
+        #         repository_study_id = data_repositories[0]['repository_study_ID'] 
         if rowdf.iloc[0]['registration_status'] == 'discovery_metadata_archive':
             archivestatus = 'archived'
             archivedate = rowdf.iloc[0]['archive_date']
@@ -202,7 +179,6 @@ def lambda_handler(event, context):
             'ov': ctlink,
             'repository_name': repository_name,
             'repository_study_id': repository_study_id,
-            'repository_metadata': repository_metadata,
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
             'heal_cde_used':[],
@@ -218,7 +194,7 @@ def lambda_handler(event, context):
         project_end_date = rowdf.iloc[0]['project_end_date']
         project_title = rowdf.iloc[0]['project_title']
         # project_num = rowdf.iloc[0]['project_num']
-        # print(f'APPL_ID: {appl_id}')
+
         return {
             'appl_id':appl_id,
             'award_type':award_type,
@@ -231,7 +207,6 @@ def lambda_handler(event, context):
     df1_null = df1.replace(np.nan, '')
     res_series1 = df1_null.groupby('guids').apply(mydf1function)
     res_df1 = pd.DataFrame(res_series1.tolist(), index=res_series1.index)
-    # print(res_df1)
     res_series3 = df3.groupby('guids').apply(mydf3function)
     res_df3 = pd.DataFrame(res_series3.tolist(), index=res_series3.index)
 
@@ -429,6 +404,7 @@ def lambda_handler(event, context):
         cedar_comp_info.append(
             [
                 hid,
+                sel_data_avail,
                 cedar_update,
                 overall_pct,
                 overall_complete,
@@ -437,6 +413,7 @@ def lambda_handler(event, context):
 
     col_names = [
         "guids",
+        "data_availability",
         "last_cedar_update",
         'overall_percent_complete',
         'overall_num_complete',
@@ -453,14 +430,14 @@ def lambda_handler(event, context):
     merged_df = merged_df.rename(columns={'guids': 'hdp_id'})
     final_df = merged_df.T.transpose()
 
+    ### END OF NOTEBOOK ###
+
     ####################################################################################
     ### Insert DataFrame into MySQL
     ####################################################################################
     print(">>> Insert DataFrame into MySQL")
     tmp_df = final_df
     tmp_df.fillna(0, inplace=True)
-    # tmp_df = tmp_df.infer_objects(copy=False)
-
 
     print(str(tmp_df['appl_id']))
     # tmp_df['appl_id'] = tmp_df['appl_id'].astype(float).astype(int).astype(str)
@@ -477,11 +454,6 @@ def lambda_handler(event, context):
     db_host = os.getenv('DB_HOST')
     db_database = os.getenv('DB_NAME')
     table_name = os.getenv('TABLE_NAME')
-
-    # db_password = 'password!'
-    # db_host = 'v07-myrdsinstance-npmuiprkdmcp.cqhcdiezce0d.us-east-1.rds.amazonaws.com'
-    # db_database = 'V07daiV5'
-    # table_name = 'checklistv6'
 
     # Drop existing records
     connection = mysql.connector.connect(
@@ -512,21 +484,8 @@ def lambda_handler(event, context):
         print("unregistered studies zeroed out")
     except mysql.connector.Error as err:
         print("unsuccessful update, error:", err)
-    
-    # Update appl_ids for CTN protocols to be CTN value
-    try:
-        for key, value in hdp_appl_dict.items():
-            if value.startswith("CTN"):
-                # Construct the SQL query
-                sql_query = f"UPDATE {table_name} SET appl_id='{value}' WHERE hdp_id='{key}';"
-                print(f'query: {sql_query}')
-                
-                # Execute the SQL query
-                cursor.execute(sql_query)
-                connection.commit()  # Commit the changes
-    except mysql.connector.Error as err:
-        print("unsuccessful update, error:", err)
-        
+
+
     # Update non-registered studies to have 0% completion
     try:
         cursor.execute(f"select appl_id, is_registered, overall_percent_complete  from progress_tracker where appl_id in ('10056337', '9608089', '9867358', '9900258', '10320676', '9839124', '10304570');")
@@ -553,3 +512,5 @@ def lambda_handler(event, context):
         'result': json.dumps(results, indent=4)
         }
     return response
+
+lambda_handler(None, None)
