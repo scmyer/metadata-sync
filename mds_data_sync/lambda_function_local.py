@@ -74,7 +74,7 @@ def lambda_handler(event, context):
     response_json = response.json()
     guids = response_json.keys()
 
-    metadata = {'nih_metadata': {}, 'ctgov_metadata': {}, 'gen3_metadata': {}, 'vlmd_metadata': {}}
+    metadata = {'nih_metadata': {}, 'ctgov_metadata': {}, 'gen3_metadata': {}, 'vlmd_metadata': {}, 'gen3_data_availability': {}}
 
     no_gen3_metadata = []
     missed_keys = []
@@ -97,6 +97,15 @@ def lambda_handler(event, context):
                             metadata['gen3_metadata'][guid][f'study_metadata.{key1}.{key2}'] = response_json[guid]['gen3_discovery']['study_metadata'][key1][key2]
                 del metadata['gen3_metadata'][guid]['study_metadata']
 
+            
+            gen3_data_availability = response_json[guid]['gen3_discovery']['data_availability'] if 'data_availability' in response_json[guid]['gen3_discovery'].keys() else ''
+            metadata['gen3_data_availability'][guid] = {'gen3_data_available':gen3_data_availability}
+            if 'data_availability' in response_json[guid]['gen3_discovery'].keys():
+                print(f"{guid}, {response_json[guid]['gen3_discovery']['data_availability']}")
+
+            ## Set vlmd_metadata to a deafult set.
+            metadata['vlmd_metadata'][guid]={'vlmd_available':False, 'data_dictionaries':[]}
+
 
         if 'nih_reporter' in response_json[guid].keys():
             metadata['nih_metadata'][guid] = response_json[guid]['nih_reporter']
@@ -110,10 +119,8 @@ def lambda_handler(event, context):
             is_jcoin = any([k['name'] == 'JCOIN' for k in tags])
             vlmd_guids[guid] = dict()
             vlmd_guids[guid]['is_jcoin'] = is_jcoin
-            vlmd_guids[guid]['dd_names'] = list(response_json[guid]['variable_level_metadata']['data_dictionaries'])
-            metadata['vlmd_metadata'][guid]['vlmd_available'] = len(vlmd_guids) > 0
-        elif 'gen3_discovery' in response_json[guid].keys():
-            metadata['vlmd_metadata'][guid]={'vlmd_available':False, 'data_dictionaries':[]}
+            vlmd_guids[guid]['dd_names'] = list(response_json[guid]['variable_level_metadata']['data_dictionaries']) if 'data_dictionaries' in response_json[guid]['variable_level_metadata'] else []
+            metadata['vlmd_metadata'][guid]['vlmd_available'] = len(vlmd_guids) > 0        
 
     ## Print studies that have variable level metadata
     with open('/tmp/vlmd_dump.json', 'w') as f:
@@ -125,6 +132,7 @@ def lambda_handler(event, context):
     df2 = transform_data(metadata['ctgov_metadata'])
     df3 = transform_data(metadata['nih_metadata'])
     df4 = transform_data(metadata['vlmd_metadata'])
+    df5 = transform_data(metadata['gen3_data_availability'])
     #df4 = pd.merge(df1, df3, how='outer', on='guids')
 
     df_apid = df3['appl_id']
@@ -218,7 +226,7 @@ def lambda_handler(event, context):
 
     def mydf4function(rowdf):
         vlmd_available = 'Yes' if rowdf.iloc[0]['vlmd_available']==True else 'No'
-        num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if rowdf.iloc[0]['vlmd_available'] else 0
+        num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if not pd.isna(rowdf.iloc[0]['data_dictionaries']) else 0
         return {
             'vlmd_available': vlmd_available,
             'number_datadicts': num_datadicts
@@ -231,7 +239,7 @@ def lambda_handler(event, context):
     res_df3 = pd.DataFrame(res_series3.tolist(), index=res_series3.index)
     res_series4 = df4.groupby('guids').apply(mydf4function)
     res_df4 = pd.DataFrame(res_series4.tolist(), index=res_series4.index)
-
+    res_df5 = df5.replace(np.nan, '')
 
     ####################################################################################
     ### CEDAR Completion
@@ -451,6 +459,7 @@ def lambda_handler(event, context):
     print(">>> Combining all dataframes")
     merged_df = pd.merge(res_df1, res_df3, how='outer', on='guids')
     merged_df = pd.merge(merged_df, res_df4, how='outer', on='guids')
+    merged_df = pd.merge(merged_df, res_df5, how='outer', on='guids')
     merged_df = pd.merge(merged_df, complxn_stats, how='outer', on='guids')
     merged_df = merged_df.rename(columns={'guids': 'hdp_id'})
     final_df = merged_df.T.transpose()
