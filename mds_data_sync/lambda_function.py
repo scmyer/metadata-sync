@@ -133,10 +133,32 @@ def lambda_handler(event, context):
         ctid = rowdf.iloc[0]['cedar_study_metadata.metadata_location.clinical_trials_study_ID']
         ctlink = rowdf.iloc[0]['cedar_study_metadata.metadata_location.clinical_trials_study_link']
         data_repositories = rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories']
+        repository_metadata= []
+        for repo in data_repositories:
+            repo_metadata = {}
+            repo_metadata['repository_name'] = repo.get('repository_name')
+            repo_metadata['repository_study_ID'] = repo.get('repository_study_ID', '')  # Default to empty string if key is missing
+            repo_metadata['repository_study_link'] = repo.get('repository_study_link', '')  # Default to empty string if key is missing
+            repository_metadata.append(repo_metadata)
+        
+        # if len(data_repositories) > 0:
+        #     print(f"----- {data_repositories[0]['repository_name']} -------")
+        #     repo_metadata = {}
+        #     for repo in data_repositories:
+        #         repo_metadata = {}
+        #         repo_metadata['repository_name'] = repo['repository_name']
+        #         repo_metadata['repository_study_ID'] = repo['repository_study_ID']
+        #         try:
+        #             repo_metadata['repository_study_link'] = repo['repository_study_link']
+        #         except:
+        #             pass
+        #         repository_metadata.append(repo_metadata)
+            print(repository_metadata)
+            
         repository_name = ''
         repository_study_id = ''
         if data_repositories != '':
-            repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
+            repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[∂0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
             repository_study_id = data_repositories[0]['repository_study_ID'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
         if rowdf.iloc[0]['registration_status'] == 'discovery_metadata_archive':
             archivestatus = 'archived'
@@ -172,6 +194,7 @@ def lambda_handler(event, context):
             'ov': ctlink,
             'repository_name': repository_name,
             'repository_study_id': repository_study_id,
+            'repository_metadata': repository_metadata,
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
             'heal_cde_used':[],
@@ -505,5 +528,3 @@ def lambda_handler(event, context):
         'result': json.dumps(results, indent=4)
         }
     return response
-
-lambda_handler(None, None)
