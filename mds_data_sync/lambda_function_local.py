@@ -96,7 +96,6 @@ def lambda_handler(event, context):
                         else:
                             metadata['gen3_metadata'][guid][f'study_metadata.{key1}.{key2}'] = response_json[guid]['gen3_discovery']['study_metadata'][key1][key2]
                 del metadata['gen3_metadata'][guid]['study_metadata']
-
             
             gen3_data_availability = response_json[guid]['gen3_discovery']['data_availability'] if 'data_availability' in response_json[guid]['gen3_discovery'].keys() else ''
             metadata['gen3_data_availability'][guid] = {'gen3_data_available':gen3_data_availability}
@@ -106,13 +105,12 @@ def lambda_handler(event, context):
             ## Set vlmd_metadata to a deafult set.
             metadata['vlmd_metadata'][guid]={'vlmd_available':False, 'data_dictionaries':[]}
 
-
         if 'nih_reporter' in response_json[guid].keys():
             metadata['nih_metadata'][guid] = response_json[guid]['nih_reporter']
 
         if 'clinicaltrials_gov' in response_json[guid].keys():
             metadata['ctgov_metadata'][guid] = response_json[guid]['clinicaltrials_gov']
-
+        
         if 'variable_level_metadata' in response_json[guid].keys():
             metadata['vlmd_metadata'][guid] = response_json[guid]['variable_level_metadata']
             tags = response_json[guid]['gen3_discovery']['tags'] if ('gen3_discovery' in response_json[guid].keys() and 'tags' in response_json[guid]['gen3_discovery']) else []
@@ -120,7 +118,7 @@ def lambda_handler(event, context):
             vlmd_guids[guid] = dict()
             vlmd_guids[guid]['is_jcoin'] = is_jcoin
             vlmd_guids[guid]['dd_names'] = list(response_json[guid]['variable_level_metadata']['data_dictionaries']) if 'data_dictionaries' in response_json[guid]['variable_level_metadata'] else []
-            metadata['vlmd_metadata'][guid]['vlmd_available'] = len(vlmd_guids) > 0        
+            metadata['vlmd_metadata'][guid]['vlmd_available'] = len(vlmd_guids[guid]['dd_names']) > 0        
 
     ## Print studies that have variable level metadata
     with open('/tmp/vlmd_dump.json', 'w') as f:
@@ -133,7 +131,8 @@ def lambda_handler(event, context):
     df3 = transform_data(metadata['nih_metadata'])
     df4 = transform_data(metadata['vlmd_metadata'])
     df5 = transform_data(metadata['gen3_data_availability'])
-    #df4 = pd.merge(df1, df3, how='outer', on='guids')
+
+#    df4 = pd.merge(df1, df3, how='outer', on='guids')
 
     df_apid = df3['appl_id']
     df1.drop(['appl_id'], axis=1, errors='ignore')
@@ -159,13 +158,33 @@ def lambda_handler(event, context):
         ctid = rowdf.iloc[0]['cedar_study_metadata.metadata_location.clinical_trials_study_ID']
         ctlink = rowdf.iloc[0]['cedar_study_metadata.metadata_location.clinical_trials_study_link']
         data_repositories = rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories']
+        repository_metadata= []
+        for repo in data_repositories:
+            repo_metadata = {}
+            repo_metadata['repository_name'] = repo.get('repository_name')
+            repo_metadata['repository_study_ID'] = repo.get('repository_study_ID', '')  # Default to empty string if key is missing
+            repo_metadata['repository_study_link'] = repo.get('repository_study_link', '')  # Default to empty string if key is missing
+            repository_metadata.append(repo_metadata)
+        
+        # if len(data_repositories) > 0:
+        #     print(f"----- {data_repositories[0]['repository_name']} -------")
+        #     repo_metadata = {}
+        #     for repo in data_repositories:
+        #         repo_metadata = {}
+        #         repo_metadata['repository_name'] = repo['repository_name']
+        #         repo_metadata['repository_study_ID'] = repo['repository_study_ID']
+        #         try:
+        #             repo_metadata['repository_study_link'] = repo['repository_study_link']
+        #         except:
+        #             pass
+        #         repository_metadata.append(repo_metadata)
+            print(repository_metadata)
+            
         repository_name = ''
         repository_study_id = ''
         if data_repositories != '':
-            if 'repository_study_ID' not in data_repositories[0]:
-                print(f"Repository study ID is missing for GUID: {rowdf.iloc[0]['guids']}")
-            repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
-            repository_study_id = data_repositories[0]['repository_study_ID'] if 'repository_study_ID' in data_repositories[0] else 'MISSING'#rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
+            repository_name = data_repositories[0].get('repository_name', '') #rowdf.iloc[∂0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
+            repository_study_id = data_repositories[0].get('repository_study_ID', '') #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
         if rowdf.iloc[0]['registration_status'] == 'discovery_metadata_archive':
             archivestatus = 'archived'
             archivedate = rowdf.iloc[0]['archive_date']
@@ -200,9 +219,11 @@ def lambda_handler(event, context):
             'ov': ctlink,
             'repository_name': repository_name,
             'repository_study_id': repository_study_id,
+            'repository_metadata': repository_metadata,
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
-            'heal_cde_used':[]
+            'heal_cde_used':[], 
+            'vlmd_metadata':[]
         }
 
     # Grab necessary metadata from NIH Metadata
@@ -240,6 +261,7 @@ def lambda_handler(event, context):
     res_series4 = df4.groupby('guids').apply(mydf4function)
     res_df4 = pd.DataFrame(res_series4.tolist(), index=res_series4.index)
     res_df5 = df5.replace(np.nan, '')
+
 
     ####################################################################################
     ### CEDAR Completion
@@ -293,7 +315,7 @@ def lambda_handler(event, context):
         is_missing_min_info = row.loc[sel_min_info].loc[missing_min_info].index.tolist()
 
         #if the column name is cedar_study_metadata.metadata_location.other_study_websites
-        # if is not nanjnbbb                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+        # if is not nan
         completed_websites = 2 if row["cedar_study_metadata.metadata_location.other_study_websites"] != np.nan else 1
 
         # only 2 fields, including autopop field
