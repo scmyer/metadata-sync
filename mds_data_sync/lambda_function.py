@@ -36,7 +36,7 @@ def lambda_handler(event, context):
                     "time_of_last_cedar_updated"]
 
     # Create a function to clean the metadata so that all unfilled dictionaries or lists are seen as NaN
-    # leave empty strings as `''`
+    # leave empty strings as ''
     def clean_data(df):
         for col in df.columns:
             for i in range(len(df)):
@@ -120,9 +120,8 @@ def lambda_handler(event, context):
     ####################################################################################
     print(">>> Pull out relevant metadata")
     def replace_single_quote(input_list):
-        modified_list = [name.replace("'", "''") for name in input_list]
+        modified_list = [name.replace("'", "`") for name in input_list]
         return str("[{}]".format(", ".join("'{}'".format(name) for name in modified_list)))
-
 
     def mydf1function(rowdf):
         projname = rowdf.iloc[0]['project_title']
@@ -158,8 +157,11 @@ def lambda_handler(event, context):
         repository_name = ''
         repository_study_id = ''
         if data_repositories != '':
-            repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[∂0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
-            repository_study_id = data_repositories[0]['repository_study_ID'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
+            # repository_name = data_repositories[0]['repository_name'] #rowdf.iloc[∂0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
+            # repository_study_id = data_repositories[0]['repository_study_ID'] #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
+            repository_name = data_repositories[0].get('repository_name', '') if data_repositories else ''
+            repository_study_id = data_repositories[0].get('repository_study_ID', '') if data_repositories else ''
+
         if rowdf.iloc[0]['registration_status'] == 'discovery_metadata_archive':
             archivestatus = 'archived'
             archivedate = rowdf.iloc[0]['archive_date']
