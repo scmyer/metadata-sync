@@ -471,7 +471,7 @@ def parse_mds_response(response_json, write_to_disk=False):
                 overall_pct,
                 overall_complete,
                 time_now
-            ] + sel_data_avail_values)
+            ])
 
     col_names = [
         "guids",
@@ -479,7 +479,7 @@ def parse_mds_response(response_json, write_to_disk=False):
         'overall_percent_complete',
         'overall_num_complete',
         'date_last_mds_update'
-    ] + sel_data_avail_colnames
+    ]
     complxn_stats = pd.DataFrame(cedar_comp_info, columns=col_names)
 
     ####################################################################################
