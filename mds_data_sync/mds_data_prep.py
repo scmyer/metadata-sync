@@ -221,7 +221,7 @@ def parse_mds_response(response_json, write_to_disk=False):
             'repository_metadata': repository_metadata,
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
-            'data_linked_on_platform': rowdf.iloc[0]['data_linked'],
+            'data_linked_on_platform': study_producing_data and (rowdf.iloc[0]['data_linked'] == 'Yes' or len(repository_study_link) > 0),
             'repository_selected': len(repository_name) > 0 and study_producing_data,
             'gen3_data_availability': gen3_data_availability,
             'is_producing_data': str(study_producing_data),
