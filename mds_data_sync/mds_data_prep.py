@@ -106,7 +106,7 @@ def parse_mds_response(response_json, write_to_disk=False):
                                  'repository_study_link': repository_study_link if is_repository_study_link else '' })
 
             ## Set vlmd_metadata to a deafult set.
-            metadata['vlmd_metadata'][guid]={'vlmd_available':False, 'data_dictionaries':[]}
+            metadata['vlmd_metadata'][guid]={'vlmd_available':False, 'data_dictionaries':[], 'common_data_element':{}}
 
         if 'nih_reporter' in response_json[guid].keys():
             metadata['nih_metadata'][guid] = response_json[guid]['nih_reporter']
@@ -121,7 +121,8 @@ def parse_mds_response(response_json, write_to_disk=False):
             vlmd_guids[guid] = dict()
             vlmd_guids[guid]['is_jcoin'] = is_jcoin
             vlmd_guids[guid]['dd_names'] = list(response_json[guid]['variable_level_metadata']['data_dictionaries']) if 'data_dictionaries' in response_json[guid]['variable_level_metadata'] else []
-            metadata['vlmd_metadata'][guid]['vlmd_available'] = len(vlmd_guids[guid]['dd_names']) > 0        
+            vlmd_guids[guid]['cdes'] = (response_json[guid]['variable_level_metadata']['common_data_elements']) if 'common_data_elements' in response_json[guid]['variable_level_metadata'] else []
+            metadata['vlmd_metadata'][guid]['vlmd_available'] = is_gen3_discovery_datatype and ((len(vlmd_guids[guid]['dd_names']) > 0) or (len(vlmd_guids[guid]['cdes']) > 0))
 
     print(f"**** Number of studies with data : {cnt}")
 
@@ -188,14 +189,17 @@ def parse_mds_response(response_json, write_to_disk=False):
             # archivedate = 'na'
             archivedate = ''
         
-        if rowdf.iloc[0]['is_registered'] == True:
+        regstatus_b = rowdf.iloc[0]['is_registered'] and study_producing_data
+        if regstatus_b:
             regstatus = 'is registered'
             regdate = rowdf.iloc[0]['time_of_registration']
             reguser = rowdf.iloc[0]['registrant_username']
+        elif not study_producing_data:
+            regstatus = 'study not producing data'
+            regdate = ''
+            reguser = ''
         else:
             regstatus = 'not registered'
-            # regdate = 'na'
-            # reguser = 'na'
             regdate = ''
             reguser = ''
         
@@ -222,7 +226,8 @@ def parse_mds_response(response_json, write_to_disk=False):
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
             'heal_cde_used':[],
-            'data_linked': rowdf.iloc[0]['data_linked'],
+            'data_linked_on_platform': rowdf.iloc[0]['data_linked'],
+            'repository_selected': len(repository_name) > 0 and study_producing_data,
             'gen3_data_availability': gen3_data_availability,
             'is_producing_data': str(study_producing_data),
             'is_producing_data_not_sharing': (study_producing_data and gen3_data_availability=='not_available')
@@ -249,10 +254,12 @@ def parse_mds_response(response_json, write_to_disk=False):
 
     def mydf4function(rowdf):
         vlmd_available = 'Yes' if rowdf.iloc[0]['vlmd_available']==True else 'No'
-        num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if not pd.isna(rowdf.iloc[0]['data_dictionaries']) else 0
+        num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if (not pd.isna(rowdf.iloc[0]['data_dictionaries']) and vlmd_available == 'Yes') else 0
+        num_cdes = len(rowdf.iloc[0]['common_data_elements']) if (not pd.isna(rowdf.iloc[0]['common_data_elements']) and vlmd_available == 'Yes') else 0
         return {
             'vlmd_available': vlmd_available,
-            'number_datadicts': num_datadicts
+            'num_data_dictionaries': num_datadicts,
+            'num_common_data_elements': num_cdes
         }
 
     df1_null = df1.replace(np.nan, '')
@@ -485,12 +492,15 @@ def parse_mds_response(response_json, write_to_disk=False):
     merged_df = merged_df.rename(columns={'guids': 'hdp_id'})
     final_df = merged_df.T.transpose()
 
-    ### END OF NOTEBOOK ###
+    ####################################################################################
+    #### Adding more derived fields
+    ####################################################################################
+
 
     ####################################################################################
-    ### Insert DataFrame into MySQL
+    ### Prepare data for 
     ####################################################################################
-    print(">>> Insert DataFrame into MySQL")
+    print(">>> Preparing combined data")
     tmp_df = final_df
     tmp_df.fillna(0, inplace=True)
 
