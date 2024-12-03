@@ -1,0 +1,1 @@
+This subdirectory includes code used to ingest new FY24 awards data. Specifically, it ingests data into the awards and pi_emails tables. As part of ingest, it combines new FY24 awards data with data in the existing tables, performs some minor data quality improvements, and reformats columns to match data dictionary specifications for each table.
