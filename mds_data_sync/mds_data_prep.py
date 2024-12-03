@@ -148,7 +148,7 @@ def parse_mds_response(response_json, write_to_disk=False):
     ####################################################################################
     print(">>> Pull out relevant metadata")
     def replace_single_quote(input_list):
-        modified_list = [name.replace("'", "''") for name in input_list]
+        modified_list = [name.replace("'", "`") for name in input_list]
         return str("[{}]".format(", ".join("'{}'".format(name) for name in modified_list)))
 
 
@@ -175,9 +175,9 @@ def parse_mds_response(response_json, write_to_disk=False):
         repository_study_id = ''
         repository_study_link = ''
         if data_repositories != '':
-            repository_name = data_repositories[0].get('repository_name', '') #rowdf.iloc[∂0]['cedar_study_metadata.metadata_location.data_repositories.repository_name']
-            repository_study_id = data_repositories[0].get('repository_study_ID', '') #rowdf.iloc[0]['cedar_study_metadata.metadata_location.data_repositories.repository_study_ID']
-            repository_study_link = data_repositories[0].get('repository_study_link', '')
+            repository_name = data_repositories[0].get('repository_name', '') if data_repositories else ''
+            repository_study_id = data_repositories[0].get('repository_study_ID', '') if data_repositories else ''
+            repository_study_link = data_repositories[0].get('repository_study_link', '') if data_repositories else ''
         
         guid_type = rowdf.iloc[0]['guid_type']
         study_producing_data = guid_type in ['discovery_metadata', 'unregistered_discovery_metadata']
@@ -225,7 +225,6 @@ def parse_mds_response(response_json, write_to_disk=False):
             'repository_metadata': repository_metadata,
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
-            'heal_cde_used':[],
             'data_linked_on_platform': rowdf.iloc[0]['data_linked'],
             'repository_selected': len(repository_name) > 0 and study_producing_data,
             'gen3_data_availability': gen3_data_availability,
@@ -256,10 +255,12 @@ def parse_mds_response(response_json, write_to_disk=False):
         vlmd_available = 'Yes' if rowdf.iloc[0]['vlmd_available']==True else 'No'
         num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if (not pd.isna(rowdf.iloc[0]['data_dictionaries']) and vlmd_available == 'Yes') else 0
         num_cdes = len(rowdf.iloc[0]['common_data_elements']) if (not pd.isna(rowdf.iloc[0]['common_data_elements']) and vlmd_available == 'Yes') else 0
+        heal_cde_used = rowdf.iloc[0]['common_data_elements'].keys() if num_cdes > 0 else []
         return {
             'vlmd_available': vlmd_available,
             'num_data_dictionaries': num_datadicts,
-            'num_common_data_elements': num_cdes
+            'num_common_data_elements': num_cdes,
+            'heal_cde_used': heal_cde_used
         }
 
     df1_null = df1.replace(np.nan, '')
