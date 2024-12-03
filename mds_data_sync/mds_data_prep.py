@@ -189,15 +189,11 @@ def parse_mds_response(response_json, write_to_disk=False):
             # archivedate = 'na'
             archivedate = ''
         
-        regstatus_b = rowdf.iloc[0]['is_registered'] and study_producing_data
+        regstatus_b = rowdf.iloc[0]['is_registered'] and (guid_type == 'discovery_metadata')
         if regstatus_b:
             regstatus = 'is registered'
             regdate = rowdf.iloc[0]['time_of_registration']
             reguser = rowdf.iloc[0]['registrant_username']
-        elif not study_producing_data:
-            regstatus = 'study not producing data'
-            regdate = ''
-            reguser = ''
         else:
             regstatus = 'not registered'
             regdate = ''
@@ -255,7 +251,7 @@ def parse_mds_response(response_json, write_to_disk=False):
         vlmd_available = 'Yes' if rowdf.iloc[0]['vlmd_available']==True else 'No'
         num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if (not pd.isna(rowdf.iloc[0]['data_dictionaries']) and vlmd_available == 'Yes') else 0
         num_cdes = len(rowdf.iloc[0]['common_data_elements']) if (not pd.isna(rowdf.iloc[0]['common_data_elements']) and vlmd_available == 'Yes') else 0
-        heal_cde_used = rowdf.iloc[0]['common_data_elements'].keys() if num_cdes > 0 else []
+        heal_cde_used = list(rowdf.iloc[0]['common_data_elements'].keys()) if num_cdes > 0 else []
         return {
             'vlmd_available': vlmd_available,
             'num_data_dictionaries': num_datadicts,
