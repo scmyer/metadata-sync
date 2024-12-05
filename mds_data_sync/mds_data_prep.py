@@ -3,8 +3,8 @@ import numpy as np
 import json
 from datetime import datetime
 import requests
-
- # Create a function to clean the metadata so that all unfilled dictionaries or lists are seen as NaN
+ 
+# Create a function to clean the metadata so that all unfilled dictionaries or lists are seen as NaN
 # leave empty strings as `''`
 def clean_data(df):
     for col in df.columns:
@@ -33,6 +33,8 @@ def transform_data(meta_dict):
 
 ## Function to parse the gen3_discovert
 def parse_mds_response(response_json, write_to_disk=False):
+
+    bool_string = lambda x: 'Yes' if x else 'No'
 
     ####################################################################################
     ### Gather metadata into useful form
@@ -68,7 +70,8 @@ def parse_mds_response(response_json, write_to_disk=False):
 
             is_manifest = (len(response_json[guid]['gen3_discovery']['__manifest']) > 0) if '__manifest' in response_json[guid]['gen3_discovery'] else False
             
-            metadata['gen3_metadata'][guid]['data_linked'] = 'Yes' if is_manifest else 'No'
+            metadata['gen3_metadata'][guid]['data_linked'] = bool_string(is_manifest)
+
             if '_guid_type' in response_json[guid].keys():
                 metadata['gen3_metadata'][guid]['guid_type'] = response_json[guid]['_guid_type'] # get registration status
                 is_gen3_discovery_datatype = response_json[guid]['_guid_type'] in ["discovery_metadata", "unregistered_discovery_metadata"]
@@ -190,12 +193,11 @@ def parse_mds_response(response_json, write_to_disk=False):
             archivedate = ''
         
         regstatus_b = rowdf.iloc[0]['is_registered'] and (guid_type == 'discovery_metadata')
+        regstatus = bool_string(regstatus_b)
         if regstatus_b:
-            regstatus = 'is registered'
             regdate = rowdf.iloc[0]['time_of_registration']
             reguser = rowdf.iloc[0]['registrant_username']
         else:
-            regstatus = 'not registered'
             regdate = ''
             reguser = ''
         
@@ -221,11 +223,12 @@ def parse_mds_response(response_json, write_to_disk=False):
             'repository_metadata': repository_metadata,
             'year_awarded': rowdf.iloc[0]['year_awarded'],
             'dmp_plan': [],
-            'data_linked_on_platform': study_producing_data and (rowdf.iloc[0]['data_linked'] == 'Yes' or len(repository_study_link) > 0),
-            'repository_selected': len(repository_name) > 0 and study_producing_data,
+            'manifest_exists': bool_string(rowdf.iloc[0]['data_linked']),
+            'data_linked_on_platform': bool_string(study_producing_data and (rowdf.iloc[0]['data_linked'] == 'Yes' or len(repository_study_link) > 0)),
+            'repository_selected': bool_string(len(repository_name) > 0 and study_producing_data),
             'gen3_data_availability': gen3_data_availability,
-            'is_producing_data': str(study_producing_data),
-            'is_producing_data_not_sharing': (study_producing_data and gen3_data_availability=='not_available')
+            'is_producing_data': bool_string(study_producing_data),
+            'is_producing_data_not_sharing': bool_string((study_producing_data and gen3_data_availability=='not_available'))
         }
 
     # Grab necessary metadata from NIH Metadata
@@ -248,7 +251,7 @@ def parse_mds_response(response_json, write_to_disk=False):
         }
 
     def mydf4function(rowdf):
-        vlmd_available = 'Yes' if rowdf.iloc[0]['vlmd_available']==True else 'No'
+        vlmd_available = bool_string(rowdf.iloc[0]['vlmd_available'])
         num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if (not pd.isna(rowdf.iloc[0]['data_dictionaries']) and vlmd_available == 'Yes') else 0
         num_cdes = len(rowdf.iloc[0]['common_data_elements']) if (not pd.isna(rowdf.iloc[0]['common_data_elements']) and vlmd_available == 'Yes') else 0
         heal_cde_used = list(rowdf.iloc[0]['common_data_elements'].keys()) if num_cdes > 0 else []
