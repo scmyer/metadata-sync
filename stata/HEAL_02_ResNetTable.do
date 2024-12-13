@@ -4,9 +4,9 @@
 /* Program: HEAL_02_ResNetTable														*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/05/13															*/
-/* Date Last Updated: 2024/10/09													*/
-/* Description:	This is the Stata program that generates and populates the res_net	*/
-/*				field in the research_networks table in MySQL. 						*/
+/* Date Last Updated: 2024/11/26													*/
+/* Description:	This program generates and populates the res_net field in the 		*/
+/*	research_networks table in MySQL. 												*/
 /*		1. Import keys 																*/
 /*		2. Create research_networks table											*/
 /*		3. Create data dictionary for research_networks table						*/
@@ -34,6 +34,7 @@ foreach tab in ref_table value_overrides {
 	missings dropvars * , force /* drop columns with no data */
 	missings dropobs * , force /* drop rows with no data */
 	save "$temp/`tab'.dta", replace
+	export delimited using "$doc/res_net_`tab'.csv", quote replace
 	}
 
 use "$temp/ref_table.dta", clear
@@ -44,6 +45,7 @@ keep res_prg res_net
 egen res_prg_tomerge=sieve(res_prg), keep(alpha)
 replace res_prg_tomerge=lower(res_prg_tomerge)
 sort res_prg_tomerge
+drop if inlist(res_prg,"Pain Management Effectiveness Research Network","Justice Community Opioid Innovation Network")
 save "$doc/ref_table.dta", replace
 
 use "$temp/value_overrides.dta", clear
@@ -60,14 +62,14 @@ use "$temp/nihtables_$today.dta", clear
 egen res_prg_tomerge=sieve(res_prg), keep(alpha)
 replace res_prg_tomerge=lower(res_prg_tomerge)
 sort res_prg_tomerge
-merge m:1 res_prg_tomerge using "$doc/ref_table.dta" /*n=1665*/
+merge m:1 res_prg_tomerge using "$doc/ref_table.dta" /*n=1934*/
 rename _merge merge_ref_table
 sort appl_id
 merge 1:1 appl_id using "$doc/value_overrides.dta"
-replace res_net=res_net_override if res_net_override_flag==1 /*n=95 changes made*/
+replace res_net=res_net_override if res_net_override_flag==1 /*n=103 changes made*/
 replace res_net_override_flag=0 if res_net_override_flag==.
 drop res_net_override _merge
-save "$temp/res_net_key.dta", replace /*n=1665*/
+save "$temp/res_net_key.dta", replace /*n=1934*/
 
 use "$temp/res_net_key.dta", clear
 keep appl_id res_net res_net_override_flag
@@ -80,7 +82,7 @@ label var appl_id "Application ID"
 label var res_net "Research Network"
 label var res_net_override_flag "Value of res_net overridden"
 save "$der/research_networks.dta", replace
-export delimited using "$der/research_networks.csv", replace /*n=1665*/
+export delimited using "$der/research_networks.csv", replace /*n=1934*/
 
 
 
